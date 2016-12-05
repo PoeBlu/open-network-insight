@@ -227,6 +227,58 @@ object FlowSuspiciousConnectsModel {
       config.nodes,
       config.ldaPRGSeed)
 
+    // n@@@@@@@@@@@@@@@ INSERTED EXTRA CODE BELOW
+
+    val wordToPerTopicProbList = wordToPerTopicProb.toList
+
+    def insertStringIntoArray (stringToInsert: String, rawArray: Array[Double]) = {
+      val rawArrayLength: Int = rawArray.length
+      var arrayWithString = Array[(Double,String)]()
+      for(i <- 0 to rawArrayLength-1)
+        // Rounding Double values to nearest thousandth
+        arrayWithString = arrayWithString.++(Array(((math floor rawArray.apply(i)*1000)/1000, stringToInsert)))
+      arrayWithString
+    }
+
+
+    def stringIntoAllArrays (rawList : List[(String, Array[Double])]): Array[Array[(Double, String)]] = {
+      var arrayWithStringsInserted = Array[Array[(Double, String)]]()
+      val rawListLength = rawList.length
+      for(i <- 0 to rawListLength-1)
+        arrayWithStringsInserted = arrayWithStringsInserted.++(Array(insertStringIntoArray(rawList.apply(i)._1, rawList.apply(i)._2)))
+      arrayWithStringsInserted
+    }
+
+    val stringInAllArrays = stringIntoAllArrays(wordToPerTopicProbList)
+
+    // Here hard coded the number of topics
+    val numberOfTopics = 20
+
+    def sortTopicWords (wordWithProbsUnsorted : Array[Array[(Double, String)]], numberOfTopics: Int) : Array[Array[(Double, String)]] = {
+      val probWithWordsUnsorted = wordWithProbsUnsorted.transpose
+      var sortedTopicWords = Array[Array[(Double, String)]]()
+      val newEntriesUnsorted = for {i <- 0 to numberOfTopics - 1} yield Array(probWithWordsUnsorted.apply(i))
+      val list = for {entry <- newEntriesUnsorted} yield entry.transpose.sortWith((x, y) => y.apply(0)._1 < x.apply(0)._1)
+      val intermediateList = for {entry <- list} yield entry.take(10).transpose
+      for (entry <- intermediateList)
+        sortedTopicWords = sortedTopicWords.++(entry)
+      sortedTopicWords
+
+    }
+    println("What Follows is the Top 10 Words foreach Topic from Flow Analysis, Topics in Rows:")
+    val sortedArrayOfTopicWords = sortTopicWords(stringInAllArrays, numberOfTopics)
+
+    // Here printing output to screen
+    for(i<-0 to 19)
+      println(sortedArrayOfTopicWords.apply(i).mkString(""))
+
+
+ // Here printing the output to an hdfs file path in a compresses format. The appropriate file path needs to be created in the hdfs file system.
+   sparkContext.parallelize(sortedArrayOfTopicWords).saveAsTextFile("/user/duxbury/flow/test/topic_profiles/20160520.txt")
+
+
+
+    // @@@@@@@@@@@@@@@@@@@@@@@@@@ INSERTED EXTRA CODE ABOVE
 
     new FlowSuspiciousConnectsModel(topicCount,
       ipToTopicMix,
