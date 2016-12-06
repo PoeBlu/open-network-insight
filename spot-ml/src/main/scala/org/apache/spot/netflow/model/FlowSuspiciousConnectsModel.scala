@@ -1,7 +1,7 @@
 package org.apache.spot.netflow.model
 
 import org.apache.log4j.Logger
-import org.apache.spark.SparkContext
+import org.apache.spark.{Accumulable, SparkContext}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, WideUDFs}
@@ -13,6 +13,8 @@ import org.apache.spot.netflow.FlowWordCreator
 import org.apache.spot.utilities.Quantiles
 import WideUDFs.udf
 import org.apache.spot.spotldacwrapper.SpotLDACWrapper
+
+import scala.util.{Failure, Success, Try}
 
 /**
   * A probabilistic model of the netflow traffic observed in a network.
@@ -44,7 +46,6 @@ class FlowSuspiciousConnectsModel(topicCount: Int,
                                   timeCuts: Array[Double],
                                   ibytCuts: Array[Double],
                                   ipktCuts: Array[Double]) {
-
 
   def score(sc: SparkContext, sqlContext: SQLContext, flowRecords: DataFrame): DataFrame = {
 
@@ -142,14 +143,21 @@ object FlowSuspiciousConnectsModel {
       config.scoresFile,
       config.duplicationFactor))
 
-
-
     // create quantile cut-offs
 
     val timeCuts = Quantiles.computeDeciles(totalDataDF
       .select(Hour, Minute, Second)
       .rdd
-      .map({ case Row(hours: Int, minutes: Int, seconds: Int) => 3600 * hours + 60 * minutes + seconds }))
+      .flatMap({ case Row(hours: Int, minutes: Int, seconds: Int) => {
+        val trial = Try {  (3600 * hours + 60 * minutes + seconds).toDouble }
+        val secondsSum = trial match{
+          case Failure(e) =>
+            Seq()
+          case Success(map) => Seq(map)
+        }
+        secondsSum
+      }
+      }))
 
     logger.info(timeCuts.mkString(","))
 
@@ -158,7 +166,15 @@ object FlowSuspiciousConnectsModel {
     val ibytCuts = Quantiles.computeDeciles(totalDataDF
       .select(Ibyt)
       .rdd
-      .map({ case Row(ibyt: Long) => ibyt.toDouble }))
+      .flatMap({ case Row(ibyt: Long) => {
+       val trial = Try {  ibyt.toDouble }
+        val ibytDouble = trial match{
+          case Failure(e) =>
+            Seq()
+          case Success(map) => Seq(map)
+        }
+        ibytDouble
+      }}))
 
     logger.info(ibytCuts.mkString(","))
 
@@ -167,8 +183,15 @@ object FlowSuspiciousConnectsModel {
     val ipktCuts = Quantiles.computeQuintiles(totalDataDF
       .select(Ipkt)
       .rdd
-      .map({ case Row(ipkt: Long) => ipkt.toDouble }))
-
+      .flatMap({ case Row(ipkt: Long) => {
+        val trial = Try { ipkt.toDouble }
+        val ipktDouble = trial match {
+          case Failure(e) =>
+            Seq()
+          case Success(map) => Seq(map)
+        }
+        ipktDouble
+        }}))
 
     logger.info(ipktCuts.mkString(","))
 
@@ -176,18 +199,19 @@ object FlowSuspiciousConnectsModel {
 
     val flowWordCreator = new FlowWordCreator(timeCuts, ibytCuts, ipktCuts)
 
-    val srcWordUDF = flowWordCreator.srcWordUDF
-    val dstWordUDF = flowWordCreator.dstWordUDF
-
     val dataWithWordsDF = totalDataDF.withColumn(SourceWord, flowWordCreator.srcWordUDF(ModelColumns: _*))
       .withColumn(DestinationWord, flowWordCreator.dstWordUDF(ModelColumns: _*))
 
     // Aggregate per-word counts at each IP
-    val srcWordCounts = dataWithWordsDF.select(SourceIP, SourceWord)
+    val srcWordCounts = dataWithWordsDF
+      .filter(SourceWord + " <> 'word_error'")
+      .select(SourceIP, SourceWord)
       .map({ case Row(sourceIp: String, sourceWord: String) => (sourceIp, sourceWord) -> 1 })
       .reduceByKey(_ + _)
 
-    val dstWordCounts = dataWithWordsDF.select(DestinationIP, DestinationWord)
+    val dstWordCounts = dataWithWordsDF
+      .filter(DestinationWord + " <> 'word_error'")
+      .select(DestinationIP, DestinationWord)
       .map({ case Row(destinationIp: String, destinationWord: String) => (destinationIp, destinationWord) -> 1 })
       .reduceByKey(_ + _)
 
@@ -216,7 +240,6 @@ object FlowSuspiciousConnectsModel {
       sqlContext,
       logger
     )
-
 
     new FlowSuspiciousConnectsModel(topicCount,
       ipToTopicMixDF,
