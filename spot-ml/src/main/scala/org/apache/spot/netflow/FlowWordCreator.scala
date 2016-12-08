@@ -72,7 +72,7 @@ class FlowWordCreator(timeCuts: Array[Double],
     */
   def flowWords(hour: Int, minute: Int, second: Int, srcPort: Int, dstPort: Int, ipkt: Long, ibyt: Long): FlowWords = {
 
-    val trial = Try {
+    Try {
       val timeOfDay: Double = hour.toDouble + minute.toDouble / 60 + second.toDouble / 3600
 
       val timeBin = Quantiles.bin(timeOfDay, timeCuts).toString()
@@ -121,14 +121,10 @@ class FlowWordCreator(timeCuts: Array[Double],
         FlowWords(srcWord = baseWord, dstWord = baseWord)
       }
 
-    }
-
-    val flowWords = trial match {
+    }match {
       case Success(flowWords) => flowWords
       case _ => FlowWords("word_error", "word_error")
     }
-
-    flowWords
   }
 
 }

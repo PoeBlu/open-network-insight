@@ -108,25 +108,23 @@ object ProxySuspiciousConnectsModel {
         .select(Time)
         .rdd
         .flatMap({ case Row(t: String) => {
-          val trial = Try {TimeUtilities.getTimeAsDouble(t)}
-          val timeCuts = trial match {
-            case Failure(e) => Seq()
-            case Success(map) =>  Seq(map)
+            Try {TimeUtilities.getTimeAsDouble(t)} match {
+              case Failure(_) => Seq()
+              case Success(map) =>  Seq(map)
+            }
           }
-          timeCuts
-        }}))
+        }))
 
     val entropyCuts = Quantiles.computeQuintiles(df
       .select(FullURI)
       .rdd
       .flatMap({ case Row(uri: String) => {
-        val trial = Try {Entropy.stringEntropy(uri)}
-        val entropyCuts = trial match {
-          case Failure(e) => Seq()
-          case Success(map) => Seq(map)
+          Try {Entropy.stringEntropy(uri)} match {
+            case Failure(_) => Seq()
+            case Success(map) => Seq(map)
+          }
         }
-        entropyCuts
-      }}))
+      }))
 
     val agentToCount: Map[String, Long] =
       df.select(UserAgent)

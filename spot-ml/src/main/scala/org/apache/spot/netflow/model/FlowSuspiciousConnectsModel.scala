@@ -149,14 +149,11 @@ object FlowSuspiciousConnectsModel {
       .select(Hour, Minute, Second)
       .rdd
       .flatMap({ case Row(hours: Int, minutes: Int, seconds: Int) => {
-        val trial = Try {  (3600 * hours + 60 * minutes + seconds).toDouble }
-        val secondsSum = trial match{
-          case Failure(e) =>
-            Seq()
-          case Success(map) => Seq(map)
+          Try {  (3600 * hours + 60 * minutes + seconds).toDouble } match{
+            case Failure(_) => Seq()
+            case Success(map) => Seq(map)
+          }
         }
-        secondsSum
-      }
       }))
 
     logger.info(timeCuts.mkString(","))
@@ -167,14 +164,12 @@ object FlowSuspiciousConnectsModel {
       .select(Ibyt)
       .rdd
       .flatMap({ case Row(ibyt: Long) => {
-       val trial = Try {  ibyt.toDouble }
-        val ibytDouble = trial match{
-          case Failure(e) =>
-            Seq()
-          case Success(map) => Seq(map)
+          Try {  ibyt.toDouble } match{
+            case Failure(_) => Seq()
+            case Success(map) => Seq(map)
+          }
         }
-        ibytDouble
-      }}))
+      }))
 
     logger.info(ibytCuts.mkString(","))
 
@@ -184,14 +179,12 @@ object FlowSuspiciousConnectsModel {
       .select(Ipkt)
       .rdd
       .flatMap({ case Row(ipkt: Long) => {
-        val trial = Try { ipkt.toDouble }
-        val ipktDouble = trial match {
-          case Failure(e) =>
-            Seq()
-          case Success(map) => Seq(map)
+          Try { ipkt.toDouble } match {
+            case Failure(_) => Seq()
+            case Success(map) => Seq(map)
+          }
         }
-        ipktDouble
-        }}))
+      }))
 
     logger.info(ipktCuts.mkString(","))
 

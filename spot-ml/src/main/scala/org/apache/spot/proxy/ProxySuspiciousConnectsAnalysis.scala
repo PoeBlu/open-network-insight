@@ -2,10 +2,12 @@ package org.apache.spot.proxy
 
 import org.apache.log4j.Logger
 import org.apache.spark.SparkContext
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.{StructType, _}
 import org.apache.spark.sql.SQLContext
 import org.apache.spot.SuspiciousConnectsArgumentParser.SuspiciousConnectsConfig
 import org.apache.spot.proxy.ProxySchema._
-import org.apache.spot.utilities.DataFrameUtils
+import org.apache.spot.utilities.data.validation.{InvalidDataHandler => dataValidation}
 
 /**
   * Run suspicious connections analysis on proxy data.
@@ -27,10 +29,8 @@ object ProxySuspiciousConnectsAnalysis {
     logger.info("Loading data from: " + config.inputPath)
 
     val rawDataDF = sqlContext.read.parquet(config.inputPath)
-      .filter(s"$Date IS NOT NULL AND $Time  IS NOT NULL AND $ClientIP IS NOT NULL AND " +
-        s"$Host IS NOT NULL AND $FullURI IS NOT NULL")
-      .select(Date, Time, ClientIP, Host, ReqMethod, UserAgent, ResponseContentType, Duration, UserName,
-        WebCat, Referer, RespCode, URIPort, URIPath, URIQuery, ServerIP, SCBytes, CSBytes, FullURI)
+      .filter(InputFilter)
+      .select(InSchema:_*)
       .na.fill("-", Seq(UserAgent))
       .na.fill("-", Seq(ResponseContentType))
 
@@ -45,40 +45,71 @@ object ProxySuspiciousConnectsAnalysis {
 
     val filteredDF = scoredDF
       .filter(Score +  " <= " + config.threshold + " AND " + Score + " > -1 ")
-    val topRows = DataFrameUtils.dfTakeOrdered(filteredDF, "score", config.maxResults)
-    val scoreIndex = scoredDF.schema.fieldNames.indexOf("score")
-    val outputRDD = sparkContext.parallelize(topRows).sortBy(row => row.getDouble(scoreIndex))
+    val mostSuspiciousDF = filteredDF.orderBy(Score).limit(config.maxResults)
 
-    logger.info("Persisting data")
-    outputRDD.map(_.mkString(config.outputDelimiter)).saveAsTextFile(config.hdfsScoredConnect)
+    val outputDF = mostSuspiciousDF.select(OutSchema:_*)
 
-    logger.info("Proxy suspcicious connects completed")
+    logger.info("Proxy suspicious connects analysis completed")
+    logger.info("Saving results to: " + config.hdfsScoredConnect)
+    outputDF.map(_.mkString(config.outputDelimiter)).saveAsTextFile(config.hdfsScoredConnect)
 
     val invalidRecords = sqlContext.read.parquet(config.inputPath)
-      .filter(s"$Date IS NULL OR $Time  IS NULL OR $ClientIP IS NULL OR " +
-        s"$Host IS NULL OR $FullURI IS NULL")
-    if(invalidRecords.count >0){
+      .filter(InvalidRecordsFilter)
+      .select(InSchema:_*)
+    dataValidation.showAndSaveInvalidRecords(invalidRecords, config.hdfsScoredConnect, logger)
 
-      val invalidRecordsFile = config.hdfsScoredConnect + "/invalid_records"
-      logger.warn("Saving invalid records to " + invalidRecordsFile)
-
-      invalidRecords.write.mode("overwrite").parquet(invalidRecordsFile)
-
-      logger.warn("Total records discarded due to NULL values in key fields: " + invalidRecords.count +
-        " . Please go to " + invalidRecordsFile +" for more details.")
-    }
-
-    val corruptedDF = scoredDF.filter(Score + " = -1")
-    if(corruptedDF.count > 0){
-
-      val corruptRecordsFile = config.hdfsScoredConnect + "/corrupt_records"
-
-      logger.warn("Saving corrupt records to " + corruptRecordsFile)
-
-      corruptedDF.write.mode("overwrite").parquet(corruptRecordsFile)
-
-      logger.warn("Total records discarded due to invalid values in key fields: " + corruptedDF.count +
-        "Please go to " + corruptRecordsFile + " for more details.")
-    }
+    val corruptRecords = scoredDF.filter(Score + " = -1")
+    dataValidation.showAndSaveCorruptRecords(corruptRecords, config.hdfsScoredConnect, logger)
   }
+
+
+  val InSchema = StructType(
+    List(DateField,
+      TimeField,
+      ClientIPField,
+      HostField,
+      ReqMethodField,
+      UserAgentField,
+      ResponseContentTypeField,
+      DurationField,
+      UserNameField,
+      WebCatField,
+      RefererField,
+      RespCodeField,
+      URIPortField,
+      URIPathField,
+      URIQueryField,
+      ServerIPField,
+      SCBytesField,
+      CSBytesField,
+      FullURIField)).fieldNames.map(col)
+
+  val OutSchema = StructType(
+    List(DateField,
+      TimeField,
+      ClientIPField,
+      HostField,
+      ReqMethodField,
+      UserAgentField,
+      ResponseContentTypeField,
+      DurationField,
+      UserNameField,
+      WebCatField,
+      RefererField,
+      RespCodeField,
+      URIPortField,
+      URIPathField,
+      URIQueryField,
+      ServerIPField,
+      SCBytesField,
+      CSBytesField,
+      FullURIField,
+      WordField,
+      ScoreField)).fieldNames.map(col)
+
+  val InputFilter = s"$Date IS NOT NULL AND $Time  IS NOT NULL AND $ClientIP IS NOT NULL AND " +
+    s"$Host IS NOT NULL AND $FullURI IS NOT NULL"
+
+  val InvalidRecordsFilter = s"$Date IS NULL OR $Time  IS NULL OR $ClientIP IS NULL OR " +
+    s"$Host IS NULL OR $FullURI IS NULL"
 }

@@ -41,7 +41,7 @@ object ProxyWordCreation {
                 timeCuts: Array[Double],
                 entropyCuts: Array[Double],
                 agentCuts: Array[Double]): String = {
-    val trial = Try{
+    Try{
       List(topDomain(proxyHost, topDomains.value).toString,
         Quantiles.bin(TimeUtilities.getTimeAsDouble(time), timeCuts).toString,
         reqMethod,
@@ -50,12 +50,10 @@ object ProxyWordCreation {
         // just the top level content type for now
         Quantiles.bin(agentCounts.value(userAgent), agentCuts),
         if (responseCode != null) responseCode(0) else "unknown_response_code").mkString("_")
-    }
-    val proxyWord = trial match {
+    } match {
       case Success(proxyWord) => proxyWord
       case _ => "word_error"
     }
-    proxyWord
   }
 
 
