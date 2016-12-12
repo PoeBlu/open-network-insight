@@ -89,7 +89,7 @@ object DNSSuspiciousConnectsAnalysis {
   val InputFilter = s"($Timestamp IS NOT NULL AND $Timestamp <> '' AND $Timestamp <> '-') " +
     s"AND ($UnixTimestamp  IS NOT NULL) " +
     s"AND ($FrameLength IS NOT NULL) " +
-    s"AND ($QueryName IS NOT NULL AND $QueryName <> '' AND $QueryName <> '-') " +
+    s"AND ($QueryName IS NOT NULL AND $QueryName <> '' AND $QueryName <> '-' AND $QueryName <> '(empty)') " +
     s"AND ($ClientIP IS NOT NULL AND $ClientIP <> '' AND $ClientIP <> '-') " +
     s"AND (($QueryClass IS NOT NULL AND $QueryClass <> '' AND $QueryClass <> '-') " +
     s"OR $QueryType IS NOT NULL " +
@@ -98,7 +98,7 @@ object DNSSuspiciousConnectsAnalysis {
   val InvalidRecordsFilter = s"($Timestamp IS NULL OR $Timestamp = '' OR $Timestamp = '-') " +
     s"OR ($UnixTimestamp  IS NULL) " +
     s"OR ($FrameLength IS NULL) " +
-    s"OR ($QueryName IS NULL OR $QueryName = '' OR $QueryName = '-') " +
+    s"OR ($QueryName IS NULL OR $QueryName = '' OR $QueryName = '-' AND $QueryName = '(empty)') " +
     s"OR ($ClientIP IS NULL OR $ClientIP = '' OR $ClientIP = '-') " +
     s"OR (($QueryClass IS NULL OR $QueryClass = '' OR $QueryClass = '-') " +
     s"AND $QueryType IS NULL " +
