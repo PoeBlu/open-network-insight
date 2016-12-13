@@ -13,6 +13,7 @@ libraryDependencies += "org.apache.spark" %% "spark-mllib" % "1.6.0"
 libraryDependencies += "org.apache.spark" %% "spark-sql" % "1.6.0"
 libraryDependencies += "org.scalatest" % "scalatest_2.10" % "2.2.6"
 libraryDependencies += "com.github.scopt" %% "scopt" % "3.5.0"
+libraryDependencies += "org.apache.spark" %% "spark-hive" % "1.6.0" % "provided"
 
 resolvers += Resolver.sonatypeRepo("public")
 
