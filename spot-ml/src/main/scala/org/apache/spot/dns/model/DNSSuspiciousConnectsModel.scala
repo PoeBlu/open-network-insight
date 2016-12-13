@@ -15,6 +15,8 @@ import org.apache.spot.lda.SpotLDAWrapper.{SpotLDAInput, SpotLDAOutput}
 import org.apache.spot.utilities.DomainProcessor.DomainInfo
 import org.apache.spot.utilities.{CountryCodes, DomainProcessor, Quantiles, TopDomains}
 
+import scala.util.{Failure, Success, Try}
+
 
 /**
   * A probabilistic model of the DNS queries issued by each client IP.
@@ -64,10 +66,11 @@ class DNSSuspiciousConnectsModel(inTopicCount: Int,
     * @param sc         Spark Context
     * @param sqlContext Spark SQL context
     * @param inDF       Dataframe of DNS log events, containing at least the columns of [[DNSSuspiciousConnectsModel.ModelSchema]]
+    * @param userDomain Domain associated to network data (ex: 'intel')
     * @return Dataframe with a column named [[org.apache.spot.dns.DNSSchema.Score]] that contains the
     *         probability estimated for the network event at that row
     */
-  def score(sc: SparkContext, sqlContext: SQLContext, inDF: DataFrame): DataFrame = {
+  def score(sc: SparkContext, sqlContext: SQLContext, inDF: DataFrame, userDomain: String): DataFrame = {
 
     val countryCodesBC = sc.broadcast(CountryCodes.CountryCodes)
     val topDomainsBC = sc.broadcast(TopDomains.TopDomains)
@@ -84,7 +87,8 @@ class DNSSuspiciousConnectsModel(inTopicCount: Int,
         topicCount,
         ipToTopicMixBC,
         wordToPerTopicProbBC,
-        topDomainsBC)
+        topDomainsBC,
+        userDomain)
 
 
     val scoringUDF = udf((timeStamp: String,
@@ -158,35 +162,93 @@ object DNSSuspiciousConnectsModel {
 
     val countryCodesBC = sparkContext.broadcast(CountryCodes.CountryCodes)
     val topDomainsBC = sparkContext.broadcast(TopDomains.TopDomains)
+    val userDomain = config.userDomain
 
     // create quantile cut-offs
 
-    val timeCuts = Quantiles.computeDeciles(totalDataDF.select(UnixTimestamp).rdd.
-      map({ case Row(unixTimeStamp: Long) => unixTimeStamp.toDouble }))
+    val timeCuts =
+      Quantiles.computeDeciles(totalDataDF
+        .select(UnixTimestamp)
+        .rdd
+        .flatMap({ case Row(unixTimeStamp: Long) => {
+          Try {unixTimeStamp.toDouble} match {
+              case Failure(_) => Seq()
+              case Success(map) => Seq(map)
+            }
+          }
+        }))
 
-    val frameLengthCuts = Quantiles.computeDeciles(totalDataDF.select(FrameLength).rdd
-      .map({ case Row(frameLen: Int) => frameLen.toDouble }))
+    val frameLengthCuts =
+      Quantiles.computeDeciles(totalDataDF
+        .select(FrameLength)
+        .rdd
+        .flatMap({case Row(frameLen: Int) => {
+            Try{frameLen.toDouble} match{
+              case Failure(_) => Seq()
+              case Success(map) => Seq(map)
+            }
+          }
+        }))
 
-    val domainStatsDF = createDomainStatsDF(sparkContext, sqlContext, countryCodesBC, topDomainsBC, totalDataDF)
+    val domainStatsDF = createDomainStatsDF(sparkContext, sqlContext, countryCodesBC, topDomainsBC, userDomain, totalDataDF)
 
-    val subdomainLengthCuts = Quantiles.computeQuintiles(domainStatsDF.filter(SubdomainLength + " > 0")
-      .select(SubdomainLength).rdd.map({ case Row(subdomainLength: Int) => subdomainLength.toDouble }))
+    val subdomainLengthCuts =
+      Quantiles.computeQuintiles(domainStatsDF
+        .filter(SubdomainLength + " > 0")
+        .select(SubdomainLength)
+        .rdd
+        .flatMap({ case Row(subdomainLength: Int) => {
+            Try{subdomainLength.toDouble} match {
+              case Failure(_) => Seq()
+              case Success(map) => Seq(map)
+            }
+          }
+        }))
 
-    val entropyCuts = Quantiles.computeQuintiles(domainStatsDF.filter(SubdomainEntropy + " > 0")
-      .select(SubdomainEntropy).rdd.map({ case Row(subdomainEntropy: Double) => subdomainEntropy }))
+    val entropyCuts =
+      Quantiles.computeQuintiles(domainStatsDF
+        .filter(SubdomainEntropy + " > 0")
+        .select(SubdomainEntropy)
+        .rdd
+        .flatMap({ case Row(subdomainEntropy: Double) => {
+          Try{subdomainEntropy.toDouble} match {
+            case Failure(_) => Seq()
+            case Success(map) => Seq(map)
+            }
+          }
+        }))
 
-    val numberPeriodsCuts = Quantiles.computeQuintiles(domainStatsDF.filter(NumPeriods + " > 0")
-      .select(NumPeriods).rdd.map({ case Row(numberPeriods: Int) => numberPeriods.toDouble }))
+    val numberPeriodsCuts =
+      Quantiles.computeQuintiles(domainStatsDF
+        .filter(NumPeriods + " > 0")
+        .select(NumPeriods)
+        .rdd
+        .flatMap({ case Row(numberPeriods: Int) => {
+          Try {numberPeriods.toDouble} match {
+            case Failure(_) => Seq()
+            case Success(map) => Seq(map)
+            }
+          }
+        }))
 
     // simplify DNS log entries into "words"
 
-    val dnsWordCreator = new DNSWordCreation(frameLengthCuts, timeCuts, subdomainLengthCuts, entropyCuts, numberPeriodsCuts, topDomainsBC)
+    val dnsWordCreator = new DNSWordCreation(frameLengthCuts,
+                                             timeCuts,
+                                             subdomainLengthCuts,
+                                             entropyCuts,
+                                             numberPeriodsCuts,
+                                             topDomainsBC,
+                                             userDomain)
 
     val dataWithWordDF = totalDataDF.withColumn(Word, dnsWordCreator.wordCreationUDF(modelColumns: _*))
 
     // aggregate per-word counts at each IP
     val ipDstWordCounts =
-      dataWithWordDF.select(ClientIP, Word).map({ case Row(destIP: String, word: String) => (destIP, word) -> 1 })
+      dataWithWordDF
+        .select(ClientIP, Word)
+        .filter(Word + " <> 'word_error'")
+        .map({ case Row(destIP: String, word: String) => (destIP, word) -> 1 })
         .reduceByKey(_ + _)
         .map({ case ((ipDst, word), count) => SpotLDAInput(ipDst, word, count) })
 
@@ -231,6 +293,7 @@ object DNSSuspiciousConnectsModel {
     * @param sqlContext     Spark SQL context.
     * @param countryCodesBC Broadcast of the country codes set.
     * @param topDomainsBC   Broadcast of the most-popular domains set.
+    * @param userDomain     Domain associated to network data (ex: 'intel')
     * @param inDF           Incoming dataframe. Schema is expected to provide the field [[QueryName]]
     * @return A new dataframe with the new columns added. The new columns have the schema [[DomainStatsSchema]]
     */
@@ -239,11 +302,13 @@ object DNSSuspiciousConnectsModel {
                           sqlContext: SQLContext,
                           countryCodesBC: Broadcast[Set[String]],
                           topDomainsBC: Broadcast[Set[String]],
+                          userDomain: String,
                           inDF: DataFrame): DataFrame = {
+
     val queryNameIndex = inDF.schema.fieldNames.indexOf(QueryName)
 
     val domainStatsRDD: RDD[Row] = inDF.rdd.map(row =>
-      Row.fromTuple(createTempFields(countryCodesBC, topDomainsBC, row.getString(queryNameIndex))))
+      Row.fromTuple(createTempFields(countryCodesBC, topDomainsBC, userDomain, row.getString(queryNameIndex))))
 
     sqlContext.createDataFrame(domainStatsRDD, DomainStatsSchema)
   }
@@ -255,15 +320,17 @@ object DNSSuspiciousConnectsModel {
     *
     * @param countryCodesBC Broadcast of the country codes set.
     * @param topDomainsBC   Broadcast of the most-popular domains set.
+    * @param userDomain     Domain associated to network data (ex: 'intel')
     * @param url            URL string to anlayze for domain and subdomain information.
     * @return [[TempFields]]
     */
   def createTempFields(countryCodesBC: Broadcast[Set[String]],
                        topDomainsBC: Broadcast[Set[String]],
+                       userDomain: String,
                        url: String): TempFields = {
 
     val DomainInfo(_, topDomainClass, subdomain, subdomainLength, subdomainEntropy, numPeriods) =
-      DomainProcessor.extractDomainInfo(url, topDomainsBC)
+      DomainProcessor.extractDomainInfo(url, topDomainsBC, userDomain)
 
 
     TempFields(topDomainClass = topDomainClass,

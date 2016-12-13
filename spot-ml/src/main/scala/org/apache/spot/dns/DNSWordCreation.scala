@@ -5,6 +5,8 @@ import org.apache.spark.sql.functions._
 import org.apache.spot.utilities.DomainProcessor.{DomainInfo, extractDomainInfo}
 import org.apache.spot.utilities.Quantiles
 
+import scala.util.{Failure, Success, Try}
+
 
 /**
   * Convert DNS log entries into "words" for topic modelling analyses.
@@ -15,13 +17,15 @@ import org.apache.spot.utilities.Quantiles
   * @param entropyCuts
   * @param numberPeriodsCuts
   * @param topDomainsBC
+  * @param userDomain
   */
 class DNSWordCreation(frameLengthCuts: Array[Double],
                       timeCuts: Array[Double],
                       subdomainLengthCuts: Array[Double],
                       entropyCuts: Array[Double],
                       numberPeriodsCuts: Array[Double],
-                      topDomainsBC: Broadcast[Set[String]]) extends Serializable {
+                      topDomainsBC: Broadcast[Set[String]],
+                      userDomain: String) extends Serializable {
 
 
   /**
@@ -77,18 +81,23 @@ class DNSWordCreation(frameLengthCuts: Array[Double],
               dnsQueryType: Int,
               dnsQueryRcode: Int): String = {
 
+    Try {
+      val DomainInfo(domain, topDomain, subdomain, subdomainLength, subdomainEntropy, numPeriods) =
+        extractDomainInfo(queryName, topDomainsBC, userDomain)
 
-    val DomainInfo(domain, topDomain, subdomain, subdomainLength, subdomainEntropy, numPeriods) =
-      extractDomainInfo(queryName, topDomainsBC)
+      Seq(topDomain,
+        Quantiles.bin(frameLength.toDouble, frameLengthCuts),
+        Quantiles.bin(unixTimeStamp.toDouble, timeCuts),
+        Quantiles.bin(subdomainLength.toDouble, subdomainLengthCuts),
+        Quantiles.bin(subdomainEntropy, entropyCuts),
+        Quantiles.bin(numPeriods.toDouble, numberPeriodsCuts),
+        dnsQueryType,
+        dnsQueryRcode).mkString("_")
+    } match {
+      case Success(word) => word
+      case _ => "word_error"
+    }
 
-    Seq(topDomain,
-      Quantiles.bin(frameLength.toDouble, frameLengthCuts),
-      Quantiles.bin(unixTimeStamp.toDouble, timeCuts),
-      Quantiles.bin(subdomainLength.toDouble, subdomainLengthCuts),
-      Quantiles.bin(subdomainEntropy, entropyCuts),
-      Quantiles.bin(numPeriods.toDouble, numberPeriodsCuts),
-      dnsQueryType,
-      dnsQueryRcode).mkString("_")
   }
 }
 

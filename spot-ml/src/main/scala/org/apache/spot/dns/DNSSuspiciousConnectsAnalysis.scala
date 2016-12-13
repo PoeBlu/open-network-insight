@@ -9,8 +9,9 @@ import org.apache.spot.SuspiciousConnectsArgumentParser.SuspiciousConnectsConfig
 import org.apache.spot.dns.DNSSchema._
 import org.apache.spot.dns.model.DNSSuspiciousConnectsModel
 import org.apache.log4j.Logger
-
 import org.apache.spot.dns.model.DNSSuspiciousConnectsModel.ModelSchema
+import org.apache.spot.proxy.ProxySchema.Score
+import org.apache.spot.utilities.data.validation.{InvalidDataHandler => dataValidation}
 
 /**
   * The suspicious connections analysis of DNS log data develops a probabilistic model the DNS queries
@@ -19,28 +20,6 @@ import org.apache.spot.dns.model.DNSSuspiciousConnectsModel.ModelSchema
 
 object DNSSuspiciousConnectsAnalysis {
 
-  val inSchema = StructType(List(TimestampField, UnixTimestampField, FrameLengthField, ClientIPField,
-      QueryNameField, QueryClassField, QueryTypeField, QueryResponseCodeField))
-
-  val inColumns = inSchema.fieldNames.map(col)
-
-
-  assert(ModelSchema.fields.forall(inSchema.fields.contains(_)))
- /**
-  val OutSchema = StructType(
-    List(TimestampField,
-      UnixTimestampField,
-      FrameLengthField,
-      ClientIPField,
-      QueryNameField,
-      QueryClassField,
-      QueryTypeField,
-      QueryResponseCodeField,
-      ScoreField))
-
-  val OutColumns = OutSchema.fieldNames.map(col)
-
-   */
   /**
     * Run suspicious connections analysis on DNS log data.
     *
@@ -51,14 +30,18 @@ object DNSSuspiciousConnectsAnalysis {
     */
   def run(config: SuspiciousConnectsConfig, sparkContext: SparkContext, sqlContext: SQLContext, logger: Logger) = {
 
+    logger.info("Starting DNS suspicious connects analysis.")
+    logger.info("Loading data from: " + config.inputPath)
+
+    val userDomain = config.userDomain
     val hiveContext = new HiveContext(sparkContext)
 
-    logger.info("Starting DNS suspicious connects analysis.")
-    logger.info("Loading data")
-
     val rawDataDF = sqlContext.read.parquet(config.inputPath)
-      .filter(Timestamp + " is not null and " + UnixTimestamp + " is not null")
-      .select(inColumns:_*)
+      .filter(InputFilter)
+      .select(InSchema:_*)
+      .na.fill("unknown", Seq(QueryClass))
+      .na.fill(-1, Seq(QueryType))
+      .na.fill(-1, Seq(QueryResponseCode))
 
     logger.info("Training the model")
 
@@ -66,7 +49,9 @@ object DNSSuspiciousConnectsAnalysis {
       DNSSuspiciousConnectsModel.trainNewModel(sparkContext, sqlContext, logger, config, rawDataDF, config.topicCount)
 
     logger.info("Scoring")
-    val scoredDF = model.score(sparkContext, sqlContext, rawDataDF)
+    val scoredDF = model.score(sparkContext, sqlContext, rawDataDF, userDomain)
+
+
     // ...............................below is Gustavos code
 
 
@@ -89,24 +74,66 @@ object DNSSuspiciousConnectsAnalysis {
     val indexDF = hiveContext.createDataFrame(scoredWithIndexRDD, newDFStruct)
 
     logger.info(indexDF.count.toString)
-    logger.info("persisting data with indexes")
-    indexDF.write.mode(SaveMode.Overwrite).saveAsTable("`brandon_dns_spark`")
-
-    logger.info("Proxy suspcicious connects completed")
     logger.info("Saving results to : brandon_dns_spark")
 
-    // ........................................what was is below, above is Gustavos code
+    indexDF.write.mode(SaveMode.Overwrite).saveAsTable("`brandon_dns_spark`")
 
-    /**
+    // ........................................above is Gustavos code
 
-    val filteredDF = scoredDF.filter(Score + " <= " + config.threshold)
-    val mostSusipiciousDF: DataFrame = filteredDF.orderBy(Score).limit(config.maxResults)
 
-    val outputDF = mostSusipiciousDF.select(OutColumns:_*).sort(Score)
+    val filteredDF = scoredDF.filter(Score + " <= " + config.threshold + " AND " + Score + " > -1")
+    val mostSuspiciousDF: DataFrame = filteredDF.orderBy(Score).limit(config.maxResults)
 
-    logger.info("DNS  suspcicious connects analysis completed.")
+    val outputDF = mostSuspiciousDF.select(OutSchema:_*).sort(Score)
+
+    logger.info("DNS  suspicious connects analysis completed.")
     logger.info("Saving results to : " + config.hdfsScoredConnect)
     outputDF.map(_.mkString(config.outputDelimiter)).saveAsTextFile(config.hdfsScoredConnect)
-      */
+
+    val invalidRecords = sqlContext.read.parquet(config.inputPath)
+      .filter(InvalidRecordsFilter)
+      .select(InSchema:_*)
+
+    dataValidation.showAndSaveInvalidRecords(invalidRecords, config.hdfsScoredConnect, logger)
+
+    val corruptRecords = scoredDF.filter(Score + " = -1")
+    dataValidation.showAndSaveCorruptRecords(corruptRecords, config.hdfsScoredConnect, logger)
   }
+
+
+  val InStructType = StructType(List(TimestampField, UnixTimestampField, FrameLengthField, ClientIPField,
+    QueryNameField, QueryClassField, QueryTypeField, QueryResponseCodeField))
+
+  val InSchema = InStructType.fieldNames.map(col)
+
+  assert(ModelSchema.fields.forall(InStructType.fields.contains(_)))
+
+  val OutSchema = StructType(
+    List(TimestampField,
+      UnixTimestampField,
+      FrameLengthField,
+      ClientIPField,
+      QueryNameField,
+      QueryClassField,
+      QueryTypeField,
+      QueryResponseCodeField,
+      ScoreField)).fieldNames.map(col)
+
+  val InputFilter = s"($Timestamp IS NOT NULL AND $Timestamp <> '' AND $Timestamp <> '-') " +
+    s"AND ($UnixTimestamp  IS NOT NULL) " +
+    s"AND ($FrameLength IS NOT NULL) " +
+    s"AND ($QueryName IS NOT NULL AND $QueryName <> '' AND $QueryName <> '-' AND $QueryName <> '(empty)') " +
+    s"AND ($ClientIP IS NOT NULL AND $ClientIP <> '' AND $ClientIP <> '-') " +
+    s"AND (($QueryClass IS NOT NULL AND $QueryClass <> '' AND $QueryClass <> '-') " +
+    s"OR $QueryType IS NOT NULL " +
+    s"OR $QueryResponseCode IS NOT NULL)"
+
+  val InvalidRecordsFilter = s"($Timestamp IS NULL OR $Timestamp = '' OR $Timestamp = '-') " +
+    s"OR ($UnixTimestamp  IS NULL) " +
+    s"OR ($FrameLength IS NULL) " +
+    s"OR ($QueryName IS NULL OR $QueryName = '' OR $QueryName = '-' AND $QueryName = '(empty)') " +
+    s"OR ($ClientIP IS NULL OR $ClientIP = '' OR $ClientIP = '-') " +
+    s"OR (($QueryClass IS NULL OR $QueryClass = '' OR $QueryClass = '-') " +
+    s"AND $QueryType IS NULL " +
+    s"AND $QueryResponseCode IS NULL)"
 }
