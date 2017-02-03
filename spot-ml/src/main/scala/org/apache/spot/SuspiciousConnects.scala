@@ -28,8 +28,10 @@ object SuspiciousConnects {
 
     val parser = SuspiciousConnectsArgumentParser.parser
 
+
     val logger = LogManager.getLogger("SuspiciousConnectsAnalysis")
     logger.setLevel(Level.INFO)
+
 
     parser.parse(args, SuspiciousConnectsConfig()) match {
       case Some(config) =>
@@ -43,12 +45,14 @@ object SuspiciousConnects {
         val sqlContext = new SQLContext(sparkContext)
         implicit val outputDelimiter = config.outputDelimiter
 
+
         analysis match {
           case "flow" => FlowSuspiciousConnectsAnalysis.run(config, sparkContext, sqlContext, logger)
           case "dns" => DNSSuspiciousConnectsAnalysis.run(config, sparkContext, sqlContext, logger)
           case "proxy" => ProxySuspiciousConnectsAnalysis.run(config, sparkContext, sqlContext, logger)
           case _ => logger.error("Unsupported (or misspelled) analysis: " + analysis)
         }
+
 
         sparkContext.stop()
 

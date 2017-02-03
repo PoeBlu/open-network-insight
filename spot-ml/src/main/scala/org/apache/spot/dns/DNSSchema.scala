@@ -39,6 +39,9 @@ object DNSSchema {
   val AnswerAddress = "dns_a"
   val AnswerAddressField = StructField(AnswerAddress, StringType, nullable= true)
 
+  val DNSRecordID = "dns_id"
+  val DNSRecordIDField = StructField(DNSRecordID, StringType, nullable= true)
+
 
   // intermediate and derived fields
 

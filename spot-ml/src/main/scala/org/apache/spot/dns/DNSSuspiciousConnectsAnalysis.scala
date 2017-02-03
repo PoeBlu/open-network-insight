@@ -54,6 +54,7 @@ object DNSSuspiciousConnectsAnalysis {
 
     // ...............................below is Gustavos code
 
+    logger.info("Indexing scored results")
 
     val scoredWithIndexMapRDD = scoredDF.orderBy(Score).rdd.zipWithIndex()
     val scoredWithIndexRDD = scoredWithIndexMapRDD.map({case (row: Row, index: Long) => Row.fromSeq(row.toSeq ++ Array(index.toString))})
@@ -61,22 +62,24 @@ object DNSSuspiciousConnectsAnalysis {
     val newDFStruct = new StructType(
       Array(
         StructField("timeStamp", StringType),
-        StructField("unixTimeStamp", StringType),
-        StructField("frameLength",StringType),
+        StructField("unixTimeStamp", LongType),
+        StructField("frameLength",IntegerType),
         StructField("clientIP",StringType),
         StructField("queryName",StringType),
-        StructField("queryClass",IntegerType),
-        StructField("queryType",StringType),
+        StructField("queryClass",StringType),
+        StructField("queryType",IntegerType),
         StructField("queryResponseCode",IntegerType),
+        StructField("dnsRecordID", StringType),
         StructField("score",DoubleType),
         StructField("index",StringType)))
 
     val indexDF = hiveContext.createDataFrame(scoredWithIndexRDD, newDFStruct)
+    val attackOnlyIndexDF = indexDF.filter(PositiveAttackFilter)
 
     logger.info(indexDF.count.toString)
     logger.info("Saving results to : brandon_dns_spark")
 
-    indexDF.write.mode(SaveMode.Overwrite).saveAsTable("`brandon_dns_spark`")
+    attackOnlyIndexDF.write.mode(SaveMode.Overwrite).saveAsTable("`brandon_dns_spark`")
 
     // ........................................above is Gustavos code
 
@@ -102,7 +105,7 @@ object DNSSuspiciousConnectsAnalysis {
 
 
   val InStructType = StructType(List(TimestampField, UnixTimestampField, FrameLengthField, ClientIPField,
-    QueryNameField, QueryClassField, QueryTypeField, QueryResponseCodeField))
+    QueryNameField, QueryClassField, QueryTypeField, QueryResponseCodeField, DNSRecordIDField))
 
   val InSchema = InStructType.fieldNames.map(col)
 
@@ -117,6 +120,7 @@ object DNSSuspiciousConnectsAnalysis {
       QueryClassField,
       QueryTypeField,
       QueryResponseCodeField,
+      DNSRecordIDField,
       ScoreField)).fieldNames.map(col)
 
   val InputFilter = s"($Timestamp IS NOT NULL AND $Timestamp <> '' AND $Timestamp <> '-') " +
@@ -136,4 +140,23 @@ object DNSSuspiciousConnectsAnalysis {
     s"OR (($QueryClass IS NULL OR $QueryClass = '' OR $QueryClass = '-') " +
     s"AND $QueryType IS NULL " +
     s"AND $QueryResponseCode IS NULL)"
+
+  val PositiveAttackFilter = s"(dnsRecordID = '0x00001775') " +
+                             s"OR (dnsRecordID = '0x00001776') " +
+                             s"OR (dnsRecordID = '0x00001777') " +
+                             s"OR (dnsRecordID = '0x00001778') " +
+                             s"OR (dnsRecordID = '0x00001779') " +
+                             s"OR (dnsRecordID = '0x0000177a') " +
+                             s"OR (dnsRecordID = '0x0000177b') " +
+                             s"OR (dnsRecordID = '0x0000177c') " +
+                             s"OR (dnsRecordID = '0x0000177e') " +
+                             s"OR (dnsRecordID = '0x0000177f') " +
+                             s"OR (dnsRecordID = '0x00001780') " +
+                             s"OR (dnsRecordID = '0x00001781') " +
+                             s"OR (dnsRecordID = '0x00001782') " +
+                             s"OR (dnsRecordID = '0x00001783') " +
+                             s"OR (dnsRecordID = '0x00001784') " +
+                             s"OR (dnsRecordID = '0x00001785') " +
+                             s"OR (dnsRecordID = '0x00001786') " +
+                             s"OR (dnsRecordID = '0x00001787') "
 }

@@ -166,6 +166,8 @@ object DNSSuspiciousConnectsModel {
 
     // create quantile cut-offs
 
+    println("Made it to just before timeCuts cuts")
+
     val timeCuts =
       Quantiles.computeDeciles(totalDataDF
         .select(UnixTimestamp)
@@ -177,6 +179,8 @@ object DNSSuspiciousConnectsModel {
             }
           }
         }))
+
+    println("Made it to just before frameLengthCuts")
 
     val frameLengthCuts =
       Quantiles.computeDeciles(totalDataDF
@@ -192,6 +196,8 @@ object DNSSuspiciousConnectsModel {
 
     val domainStatsDF = createDomainStatsDF(sparkContext, sqlContext, countryCodesBC, topDomainsBC, userDomain, totalDataDF)
 
+    println("Made it to just before subdomainLengthCuts")
+
     val subdomainLengthCuts =
       Quantiles.computeQuintiles(domainStatsDF
         .filter(SubdomainLength + " > 0")
@@ -205,6 +211,8 @@ object DNSSuspiciousConnectsModel {
           }
         }))
 
+    println("Made it to just before entropyCuts")
+
     val entropyCuts =
       Quantiles.computeQuintiles(domainStatsDF
         .filter(SubdomainEntropy + " > 0")
@@ -217,6 +225,8 @@ object DNSSuspiciousConnectsModel {
             }
           }
         }))
+
+    println("Made it to just before numberPeriodsCuts")
 
     val numberPeriodsCuts =
       Quantiles.computeQuintiles(domainStatsDF
@@ -262,6 +272,8 @@ object DNSSuspiciousConnectsModel {
       config.ldaAlpha,
       config.ldaBeta,
       config.ldaMaxiterations)
+
+    println("made it past Spark LDA")
 
     // Since DNS is still broadcasting ip to topic mix, we need to convert data frame to Map[String, Array[Double]]
     val ipToTopicMix = ipToTopicMixDF
