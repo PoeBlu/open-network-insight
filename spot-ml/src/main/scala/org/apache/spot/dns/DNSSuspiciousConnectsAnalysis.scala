@@ -149,7 +149,8 @@ object DNSSuspiciousConnectsAnalysis {
                              s"OR (dnsRecordID = '0x0000177a') " +
                              s"OR (dnsRecordID = '0x0000177b') " +
                              s"OR (dnsRecordID = '0x0000177c') " +
-                             s"OR (dnsRecordID = '0x0000177e') " +
+                             s"OR (dnsRecordID = '0x0000177d') " +
+			     s"OR (dnsRecordID = '0x0000177e') " +
                              s"OR (dnsRecordID = '0x0000177f') " +
                              s"OR (dnsRecordID = '0x00001780') " +
                              s"OR (dnsRecordID = '0x00001781') " +
